@@ -43,11 +43,14 @@ class DotaRentProcessor(BaseRentProcessor):
                 status = not (acc.is_banned or acc.is_busy)
                 if lot.active == status:
                     continue
-                
-                if not status:
-                    LotsManager.disable_lot(self.account, lot)
-                else:
-                    LotsManager.enable_lot(self.account, lot)
+                try:
+                    if not status:
+                        LotsManager.disable_lot(self.account, lot)
+                    else:
+                        LotsManager.enable_lot(self.account, lot)
+                except Exception as e:
+                    logger.error(f"Ошибка - change_lots_status - {lot.description} , {lot.id}")
+                    
                 logger.info(f"{'✅' if status else '❌'} Лот {acc.login}: {'вкл' if status else 'выкл'}")
                 time.sleep(1)
             time.sleep(60)
@@ -140,12 +143,12 @@ class DotaRentProcessor(BaseRentProcessor):
 ⏰ Узнать время: !время
 📌 Продлить: !продлить {order.id}
 ⚠️ По истечению срока вы будете отключены!"""
-        chat_id = self.get_chat_id(order.buyer_id)
+        chat_id = order.chat_id
         self.account.send_message(chat_id, message)
         logger.info(f"✅ Заказ {order.id}: аккаунт {login} выдан")
 
     def on_sale_extend(self, order: OrderShortcut, original_order_id):
-        chat_id = self.get_chat_id(order.buyer_id)
+        chat_id = order.chat_id
         self.db.extend_rental(original_order_id, order.amount * 60)
 
         rent = self.db.get_rental_by_order_id(original_order_id)
