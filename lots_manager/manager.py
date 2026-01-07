@@ -1,5 +1,6 @@
 
 from FunPayAPI import Account, types
+from FunPayAPI.account import logger
 from rent import game_type
 from rent.game_type import GameType
 from rent.dota.config import DotaConfig
@@ -20,12 +21,15 @@ class LotsManager:
 
     @staticmethod
     def find_lot_by_login(account: Account, game_type: GameType, login: str) -> Optional[types.MyLotShortcut]:
-        node_id = LotsManager.configs[game_type]
-        subcategory_lots = account.get_my_subcategory_lots(node_id)
-        for lot in subcategory_lots:
-            if login in lot.description:
-                return lot
-        return None
+        try:
+            node_id = LotsManager.configs[game_type]
+            subcategory_lots = account.get_my_subcategory_lots(node_id)
+            for lot in subcategory_lots:
+                if login in lot.description:
+                    return lot
+            return None
+        except:
+            pass
 
     @staticmethod
     def find_extend_lot(account: Account, order_id:str, game_type: GameType):

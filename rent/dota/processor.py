@@ -35,7 +35,13 @@ class DotaRentProcessor(BaseRentProcessor):
 
     def change_lots_status(self):
         while True:
-            all_lots = LotsManager.find_all_game_lots(self.account, self.game_type)
+            try:
+                all_lots = LotsManager.find_all_game_lots(self.account, self.game_type)
+            except:
+                logger.error(f"Ошибка - change_lots_status | find_all_game_lots - {lot.description} , {lot.id}")
+                time.sleep(10)
+                continue
+
             for lot in all_lots:
                 login = lot.description.split("|")[-1].split(",")[0].strip().lower()
                 acc = self.db.get_account_by_login(login)
@@ -50,7 +56,7 @@ class DotaRentProcessor(BaseRentProcessor):
                         LotsManager.enable_lot(self.account, lot)
                 except Exception as e:
                     logger.error(f"Ошибка - change_lots_status - {lot.description} , {lot.id}")
-                    
+
                 logger.info(f"{'✅' if status else '❌'} Лот {acc.login}: {'вкл' if status else 'выкл'}")
                 time.sleep(1)
             time.sleep(60)
@@ -62,10 +68,14 @@ class DotaRentProcessor(BaseRentProcessor):
         while True:
             all_accounts = self.db.get_accounts_by_game(self.game_type)
             for acc in all_accounts:
-                lot = LotsManager.find_lot_by_login(self.account, self.game_type, acc.login)
-                if not lot:
-                    LotsManager.create_dota_rent(self.account, acc.mmr, acc.login, not (acc.is_busy or acc.is_banned), acc.behavior_score)
-                    logger.info(f"✅ Создан лот: {acc.login}")
+                try:
+                    lot = LotsManager.find_lot_by_login(self.account, self.game_type, acc.login)
+                    if not lot:
+                        LotsManager.create_dota_rent(self.account, acc.mmr, acc.login, not (acc.is_busy or acc.is_banned), acc.behavior_score)
+                        logger.info(f"✅ Создан лот: {acc.login}")
+                except:
+                    logger.error(f"Ошибка - create_missing_lots - {acc}")
+
                 time.sleep(1)
             time.sleep(60)
 
@@ -80,6 +90,7 @@ class DotaRentProcessor(BaseRentProcessor):
             result = kick_user_from_account(login, password)
             if not result:
                 logger.error(f"❌ Не удалось выкинуть из аккаунта: {login}")
+            logger.info(f"Успешно выкинули с аккаунта {login}")
         except:
             logger.error(f"❌ Не удалось выкинуть из аккаунта: {login}")
 
