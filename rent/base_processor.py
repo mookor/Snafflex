@@ -110,6 +110,7 @@ class BaseRentProcessor(ABC):
         chat_id = self.get_chat_id(buyer_id)
         self.db.set_in_rent_false(order_id)
         self.db.set_account_busy(login=rent.account_login, is_busy=False)
+        self.db.update_account_rented_by(rent.account_login, None)
 
         account = self.db.get_account_by_login(rent.account_login)
         self.kick(login=account.login, password=account.password)

@@ -43,7 +43,7 @@ class DotaRentProcessor(BaseRentProcessor):
                 status = not (acc.is_banned or acc.is_busy)
                 if lot.active == status:
                     continue
-
+                
                 if not status:
                     LotsManager.disable_lot(self.account, lot)
                 else:
