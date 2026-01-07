@@ -51,20 +51,14 @@ class BaseRentProcessor(ABC):
         self, order_id: str, buyer_id: int, message, login = None
     ):
         try:
-            logger.info(f"💰 Возврат средств для заказа {order_id}, покупатель: {buyer_id}")
             self.account.refund(order_id)
-            logger.info(f"✅ Средства возвращены для заказа {order_id}")
-            
             chat_id = self.get_chat_id(buyer_id)
-            logger.info(f"📨 Отправка сообщения покупателю {buyer_id} в чат {chat_id}")
             self.account.send_message(chat_id, message)
-            logger.info(f"✅ Сообщение отправлено покупателю {buyer_id}")
-            
             if login:
-                logger.warning(f"🚫 Блокировка аккаунта {login} из-за возврата заказа {order_id}")
                 self.db.set_account_banned(login, True)
-                logger.info(f"✅ Аккаунт {login} заблокирован")
-        except:
+            logger.info(f"💰 Возврат: заказ {order_id}" + (f", аккаунт {login} заблокирован" if login else ""))
+        except Exception as e:
+            logger.error(f"❌ Ошибка возврата {order_id}: {e}")
             chat_id = self.get_chat_id(buyer_id)
             self.account.send_message(chat_id, "Возникла проблема, пожалуйста, дождитесь ответа администратора")
 
@@ -103,6 +97,7 @@ class BaseRentProcessor(ABC):
             "🎉 Спасибо за отзыв!\n"
             "🎁 Мы начислили вам дополнительный час игрового времени!",
         )
+        logger.info(f"🎁 Бонус за отзыв: {order_id} +1ч")
 
     def on_rental_expired(self, rent: RentalInfo):
         """
@@ -110,31 +105,22 @@ class BaseRentProcessor(ABC):
         """
         order_id = rent.order_id
         buyer_id = rent.buyer_id
-
-        logger.info(f"⏰ Обработка истекшей аренды: заказ {order_id}, аккаунт {rent.account_login}, покупатель {buyer_id}")
+        logger.info(f"⏰ Аренда истекла: {order_id}, аккаунт {rent.account_login}")
 
         chat_id = self.get_chat_id(buyer_id)
         self.db.set_in_rent_false(order_id)
-        logger.info(f"✅ Статус аренды обновлен: in_rent = False для заказа {order_id}")
-        
         self.db.set_account_busy(login=rent.account_login, is_busy=False)
-        logger.info(f"✅ Аккаунт {rent.account_login} освобожден (is_busy = False)")
 
         account = self.db.get_account_by_login(rent.account_login)
-        logger.info(f"🔄 Выкидывание пользователя из аккаунта {rent.account_login}")
         self.kick(login=account.login, password=account.password)
 
-        logger.info(f"🔧 Попытка пересоздания лота для аккаунта {rent.account_login}")
         recreate_status = LotsManager.recreate_lot(
             account=self.account, game_type=self.game_type, login=rent.account_login
         )
         if not recreate_status:
-            logger.warning(f"⚠️ Не удалось пересоздать лот для {rent.account_login}, будет создан новый")
+            logger.warning(f"⚠️ Не удалось пересоздать лот для {rent.account_login}")
             self.create_missing_lots()
-        else:
-            logger.info(f"✅ Лот успешно пересоздан для аккаунта {rent.account_login}")
-        
-        logger.info(f"📨 Отправка уведомлений покупателю {buyer_id} об истечении аренды")
+
         self.account.send_message(
             chat_id,
             f"⏰ Время аренды #{order_id} истекло! Аккаунт был освобождён.\n"
@@ -145,7 +131,6 @@ class BaseRentProcessor(ABC):
             chat_id,
             f"Заказ выполнен. Пожалуйста, зайдите в раздел «Покупки», выберите его в списке и нажмите кнопку «Подтвердить выполнение заказа»",
         )
-        logger.info(f"🎉 Обработка истекшей аренды {order_id} завершена")
 
     @abstractmethod
     def get_code(self, login: str):
@@ -231,6 +216,7 @@ class BaseRentProcessor(ABC):
         extend_lot = LotsManager.find_extend_lot(self.account, order_id, rent.game_type)
 
         if not extend_lot:
+            logger.error(f"❌ Не удалось создать лот продления: {order_id}")
             self.account.send_message(
                 chat_id,
                 "❌ Не удалось найти созданный лот продления. Попробуйте позже или обратитесь к администратору.",
@@ -242,6 +228,7 @@ class BaseRentProcessor(ABC):
             f"✨ Лот на продление заказа {order_id} создан.\n"
             f"Ссылка для оплаты: {extend_lot.public_link}",
         )
+        logger.info(f"📌 Создан лот продления: {order_id}")
 
     @abstractmethod
     def auto_reply(self, message):
@@ -253,27 +240,15 @@ class BaseRentProcessor(ABC):
     def find_expired_rents(self):
         while True:
             expired_rents = self.db.get_expired_rentals()
-            
-            if expired_rents:
-                logger.info(f"⏰ Найдено {len(expired_rents)} истекших аренд для обработки")
-            else:
-                logger.debug(f"🔍 Проверка истекших аренд: не найдено")
-
             for rent in expired_rents:
-                logger.info(f"🔄 Обработка истекшей аренды: заказ {rent.order_id}, аккаунт {rent.account_login}")
                 self.on_rental_expired(rent)
 
             rents_for_notify = self.db.get_rentals_expiring_soon(
                 RentConfig.NOTIFY_TIME + 1
             )
-            
-            if rents_for_notify:
-                logger.info(f"📢 Найдено {len(rents_for_notify)} аренд для уведомления")
-            
             for rent in rents_for_notify:
                 self.notify(rent)
-            
-            logger.debug(f"⏳ Ожидание 60 секунд до следующей проверки")
+
             time.sleep(60)
 
     def notify(self, rent: RentalInfo):
@@ -291,8 +266,8 @@ class BaseRentProcessor(ABC):
             f"⚠️ Если хотите продолжить играть, оформите продление заказа.\n"
             f"⚠️ После окончания времени вы будете отключены от аккаунта. Продлить аренду уже не получится",
         )
-
         self.db.set_notified(order_id)
+        logger.info(f"📢 Уведомление: {order_id} истекает через ~{hours}ч {minutes}мин")
 
     def start_task(self, task):
         task_thread = Thread(target=task, daemon=True)
