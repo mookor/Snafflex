@@ -115,7 +115,7 @@ class BaseRentProcessor(ABC):
         self.kick(login=account.login, password=account.password)
 
         recreate_status = LotsManager.recreate_lot(
-            account=self.account, game_type=self.game_type, login=rent.account_login
+            account=self.account, game_type=rent.game_type, login=rent.account_login
         )
         if not recreate_status:
             logger.warning(f"⚠️ Не удалось пересоздать лот для {rent.account_login}")
@@ -275,7 +275,7 @@ class BaseRentProcessor(ABC):
         self.runned_tasks[task.__name__] = task_thread
 
     @abstractmethod
-    def kick(self, login: str):
+    def kick(self, login: str, password: str):
         pass
 
 
