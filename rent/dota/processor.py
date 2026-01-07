@@ -179,7 +179,6 @@ class DotaRentProcessor(BaseRentProcessor):
                 time.sleep(DotaConfig.MMR_UPDATE_INTERVAL)
     
     def run_tasks(self):
-        self.start_task(self.find_expired_rents)
         self.start_task(self.update_mmr)
         self.start_task(self.change_lots_status)
         self.start_task(self.create_missing_lots)

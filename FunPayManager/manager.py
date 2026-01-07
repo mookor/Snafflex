@@ -43,7 +43,7 @@ class FunPayManager:
             disabled_order_requests=False,
             disabled_buyer_viewing_requests=True,
         )
-        self.processors["CommonRentProcessor"] = CommonRentProcessor(self.account)
+        self.processors["CommonRentProcessor"] = CommonRentProcessor(self.account, self.profile)
         logger.info(f"✅ FunPay подключен: {self.account.username}")
 
     def _run_tasks(self):
