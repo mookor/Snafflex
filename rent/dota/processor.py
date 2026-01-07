@@ -43,11 +43,14 @@ class DotaRentProcessor(BaseRentProcessor):
                 status = not (acc.is_banned or acc.is_busy)
                 if lot.active == status:
                     continue
-
-                if not status:
-                    LotsManager.disable_lot(self.account, lot)
-                else:
-                    LotsManager.enable_lot(self.account, lot)
+                try:
+                    if not status:
+                        LotsManager.disable_lot(self.account, lot)
+                    else:
+                        LotsManager.enable_lot(self.account, lot)
+                except Exception as e:
+                    logger.error(f"Ошибка - change_lots_status - {lot.description} , {lot.id}")
+                    
                 logger.info(f"{'✅' if status else '❌'} Лот {acc.login}: {'вкл' if status else 'выкл'}")
                 time.sleep(1)
             time.sleep(60)
