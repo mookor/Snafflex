@@ -9,6 +9,9 @@ from db.database import RentDatabase
 import re
 from FunPayAPI.common.enums import MessageTypes
 import time
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 class FunPayManager:
     def __init__(self):
         self.processors: dict[str, BaseRentProcessor] = {}
@@ -41,6 +44,7 @@ class FunPayManager:
             disabled_buyer_viewing_requests=True,
         )
         self.processors["CommonRentProcessor"] = CommonRentProcessor(self.account)
+        logger.info(f"✅ FunPay подключен: {self.account.username}")
 
     def _run_tasks(self):
         for k, processor in self.processors.items():
@@ -67,6 +71,7 @@ class FunPayManager:
         if not match:
             return
         order_id = match.group(1)
+        logger.info(f"⭐ Отзыв: заказ {order_id}")
         processor.on_review(order_id)
 
     def _handle_rent_order(self, order):
@@ -131,6 +136,7 @@ class FunPayManager:
 
         if message.startswith("!продлить"):
             if order_id := self._parse_order_id(message, "!продлить", chat_id):
+                logger.info(f"📝 Команда !продлить: {order_id}")
                 self._common_processor.on_extend(order_id, buyer_id)
             return
 
@@ -138,6 +144,7 @@ class FunPayManager:
             if not (order_id := self._parse_order_id(message, "!code", chat_id)):
                 return
             if rent := self._get_rent_or_error(order_id, chat_id):
+                logger.info(f"🔐 Команда !code: {order_id}")
                 self.processors[self.gt_keys[rent.game_type]].on_get_code(order_id, buyer_id)
             return
 
@@ -155,7 +162,9 @@ class FunPayManager:
                     "К сожалению, время для автоматического возврата средств истекло.\n"
                     "Пожалуйста, дождитесь ответа администратора."
                 )
+                logger.warning(f"⚠️ Команда !ban просрочена: {order_id}")
                 return
+            logger.info(f"🚫 Команда !ban: {order_id}")
             reply_message = (
                 "😔 Приносим извинения за неудобства!\n\n"
                 "Средства были автоматически возвращены.\n"
