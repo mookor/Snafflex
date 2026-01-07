@@ -10,12 +10,16 @@ import re
 from FunPayAPI.common.enums import MessageTypes
 import time
 class FunPayManager:
-    def __init__(self, ):
-        self.processors = {}
+    def __init__(self):
+        self.processors: dict[str, BaseRentProcessor] = {}
         self._init_funpay()
-        self.rent_keys = []
-        self.gt_keys = {}
+        self.rent_keys: list[str] = []
+        self.gt_keys: dict[GameType, str] = {}
         self.db = RentDatabase()
+
+    @property
+    def _common_processor(self) -> CommonRentProcessor:
+        return self.processors["CommonRentProcessor"]  # type: ignore
         
 
     def add_processor(self, key, processor: BaseRentProcessor, is_rent = False, game_type = None):
@@ -57,7 +61,7 @@ class FunPayManager:
                     self._handle_new_message(event)
     
     def _handle_feedback(self, event):
-        processor: CommonRentProcessor = self.processors["CommonRentProcessor"]
+        processor: CommonRentProcessor = self._common_processor
         ORDER_ID_PATTERN = re.compile(r"#([A-Z0-9]{8})")
         match = ORDER_ID_PATTERN.search(event.message.text)
         if not match:
@@ -100,77 +104,66 @@ class FunPayManager:
             self._handle_command(message_text, buyer_id, chat_id)
 
 
+    def _parse_order_id(self, message: str, cmd: str, chat_id: str) -> str | None:
+        """Извлекает order_id из команды. Возвращает None и шлёт ошибку если формат неверный."""
+        parts = message.split()
+        if len(parts) < 2:
+            self.account.send_message(
+                chat_id,
+                f"❌ Неверный формат команды.\n"
+                f"Используйте: {cmd} <номер_заказа>\n"
+                f"Например: {cmd} ABC12345"
+            )
+            return None
+        return parts[1].upper()
+
+    def _get_rent_or_error(self, order_id: str, chat_id: str):
+        """Возвращает аренду или None с отправкой ошибки."""
+        rent = self.db.get_rental_by_order_id(order_id)
+        if not rent:
+            self.account.send_message(chat_id, "❌ Заказ не найден.")
+        return rent
+
     def _handle_command(self, message: str, buyer_id: int, chat_id: str):
+        if message == "!время":
+            self._common_processor.on_get_time(buyer_id)
+            return
+
         if message.startswith("!продлить"):
-            parts = message.split()
-            if len(parts) < 2:
-                self.account.send_message(
-                    chat_id,
-                    "❌ Неверный формат команды.\n"
-                    "Используйте: !продлить <номер_заказа>\n"
-                    "Например: !продлить ABC12345"
-                )
-            order_id = parts[1].upper()
-            processor: CommonRentProcessor = self.processors["CommonRentProcessor"]
-            processor.on_extend(order_id, buyer_id)
-        elif message == "!время":
-            processor: CommonRentProcessor = self.processors["CommonRentProcessor"]
-            processor.on_get_time(buyer_id)
+            if order_id := self._parse_order_id(message, "!продлить", chat_id):
+                self._common_processor.on_extend(order_id, buyer_id)
+            return
 
-        elif message.startswith("!code"):
-            parts = message.split()
-            if len(parts) < 2:
-                self.account.send_message(
-                    chat_id,
-                    "❌ Неверный формат команды.\n"
-                    "Используйте: !code <номер_заказа>\n"
-                    "Например: !code ABC12345"
-                )
+        if message.startswith("!code"):
+            if not (order_id := self._parse_order_id(message, "!code", chat_id)):
                 return
+            if rent := self._get_rent_or_error(order_id, chat_id):
+                self.processors[self.gt_keys[rent.game_type]].on_get_code(order_id, buyer_id)
+            return
 
-            order_id = parts[1].upper()
-            rent = self.db.get_rental_by_order_id(order_id)
-            if not rent:
-                self.account.send_message(chat_id, "❌ Заказ не найден.\nПравильное использование: !code <id заказа>\nНапример: !code ABC12345")
+        if message.startswith("!ban"):
+            if not (order_id := self._parse_order_id(message, "!ban", chat_id)):
                 return
-            processor: BaseRentProcessor = self.processors[self.gt_keys[rent.game_type]]
-            processor.on_get_code(order_id, buyer_id)
-        elif message.startswith("!ban"):
-            parts = message.split()
-            if len(parts) < 2:
-                self.account.send_message(
-                    chat_id,
-                    "❌ Неверный формат команды.\n"
-                    "Используйте: !ban <номер_заказа>\n"
-                    "Например: !ban ABC12345"
-                )
-                return
-
-            order_id = parts[1].upper()
-            rent = self.db.get_rental_by_order_id(order_id)
-            if not rent:
-                self.account.send_message(chat_id, "❌ Заказ не найден.\nПравильное использование: !ban <id заказа>\nНапример: !ban ABC12345")
+            if not (rent := self._get_rent_or_error(order_id, chat_id)):
                 return
             if rent.buyer_id != buyer_id:
+                self.account.send_message(chat_id, "❌ Этот заказ не принадлежит вам.")
+                return
+            if (time.time() - rent.start_rent_time) > 60 * 10:
                 self.account.send_message(
-                chat_id,
-                "❌ Этот заказ не принадлежит вам."
+                    chat_id,
+                    "К сожалению, время для автоматического возврата средств истекло.\n"
+                    "Пожалуйста, дождитесь ответа администратора."
                 )
                 return
-            current_time = time.time()
-            cant_auto_return = (current_time - rent.start_rent_time) > 60*10
-            if cant_auto_return:
-                self.account.send_message(chat_id, f"К сожалению, время для автоматического возврата средств истекло\nПожалуйста, дождитесть ответа администратора")
-                return
+            reply_message = (
+                "😔 Приносим извинения за неудобства!\n\n"
+                "Средства были автоматически возвращены.\n"
+                "Спасибо за понимание! Надеемся, вы вернётесь к нам снова. 🙏"
+            )
+            self.processors[self.gt_keys[rent.game_type]].on_return(
+                order_id, buyer_id, reply_message, rent.account_login
+            )
+            return
 
-            processor: BaseRentProcessor = self.processors[self.gt_keys[rent.game_type]]
-            reply_message = "😔 Приносим извинения за неудобства!\n\n"
-            "Средства были автоматически возвращены.\n"
-            "Спасибо за понимание! Надеемся, вы вернётесь к нам снова. 🙏"
-            processor.on_return(order_id, buyer_id,reply_message,rent.account_login)
-            
-        else:
-            self.account.send_message(
-                    chat_id, "❌ Неизвестная команда")
-            
-            
+        self.account.send_message(chat_id, "❌ Неизвестная команда")
