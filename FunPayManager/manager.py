@@ -15,10 +15,10 @@ logger = get_logger(__name__)
 class FunPayManager:
     def __init__(self):
         self.processors: dict[str, BaseRentProcessor] = {}
-        self._init_funpay()
         self.rent_keys: list[str] = []
         self.gt_keys: dict[GameType, str] = {}
         self.db = RentDatabase()
+        self._init_funpay()
 
     @property
     def _common_processor(self) -> CommonRentProcessor:
