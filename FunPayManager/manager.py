@@ -31,6 +31,13 @@ class FunPayManager:
         if is_rent:
             self.rent_keys.append(key)
             self.gt_keys[game_type] = key
+        
+        # Обновляем ссылки на процессоры в CommonRentProcessor после добавления нового процессора
+        if "CommonRentProcessor" in self.processors:
+            common_proc = self.processors["CommonRentProcessor"]
+            if hasattr(common_proc, '_processors_dict'):
+                common_proc._processors_dict = self.processors
+                common_proc._gt_keys_dict = self.gt_keys
 
 
     def _init_funpay(self):
@@ -44,7 +51,11 @@ class FunPayManager:
                 disabled_order_requests=False,
                 disabled_buyer_viewing_requests=True,
             )
-            self.processors["CommonRentProcessor"] = CommonRentProcessor(self.account, self.profile)
+            self.processors["CommonRentProcessor"] = CommonRentProcessor(
+            self.account, self.profile, 
+            processors_dict=self.processors, 
+            gt_keys_dict=self.gt_keys
+        )
             logger.info(f"✅ FunPay подключен: {self.account.username}")
         except Exception as e:
             logger.error(f"❌ Критическая ошибка при инициализации FunPay: {e}", exc_info=True)

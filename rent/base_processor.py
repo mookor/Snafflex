@@ -148,9 +148,36 @@ class BaseRentProcessor(ABC):
             try:
                 account = self.db.get_account_by_login(rent.account_login)
                 if account:
-                    self.kick(login=account.login, password=account.password)
+                    # Если это CommonRentProcessor, нужно получить правильный процессор
+                    # Для этого используем прямое определение типа
+                    if hasattr(self, 'game_type') and self.game_type == GameType.NONE:
+                        # Это CommonRentProcessor, нужно найти правильный процессор
+                        # Импортируем здесь, чтобы избежать циклических импортов
+                        from rent.common.processor import CommonRentProcessor
+                        if isinstance(self, CommonRentProcessor):
+                            # Получаем правильный процессор через game_type
+                            processor = self._get_processor_by_game_type(rent.game_type)
+                            if processor:
+                                processor.kick(login=account.login, password=account.password)
+                            else:
+                                logger.warning(f"⚠️ Процессор для {rent.game_type} не найден, используем прямой вызов")
+                                # Фолбэк: используем прямой импорт функции
+                                from auth.steam.steam_client import kick_user_from_account
+                                try:
+                                    result = kick_user_from_account(account.login, account.password)
+                                    if result:
+                                        logger.info(f"✅ Успешно выкинули с аккаунта {account.login} (прямой вызов)")
+                                    else:
+                                        logger.error(f"❌ Не удалось выкинуть из аккаунта {account.login} (прямой вызов)")
+                                except Exception as e:
+                                    logger.error(f"❌ Ошибка при прямом вызове kick_user_from_account: {e}", exc_info=True)
+                        else:
+                            self.kick(login=account.login, password=account.password)
+                    else:
+                        # Это специфичный процессор (DotaRentProcessor и т.д.), используем его метод
+                        self.kick(login=account.login, password=account.password)
                 else:
-                    logger.error(f"❌ Ошибка при отключении пользователя от аккаунта {rent.account_login}")
+                    logger.error(f"❌ Аккаунт {rent.account_login} не найден в БД")
                     
             except Exception as e:
                 logger.error(f"❌ Ошибка при отключении пользователя от аккаунта {rent.account_login}: {e}", exc_info=True)
@@ -187,6 +214,13 @@ class BaseRentProcessor(ABC):
                 logger.error(f"❌ Ошибка отправки сообщения о подтверждении заказа {order_id}: {e}")
         except Exception as e:
             logger.error(f"❌ Критическая ошибка при обработке истечения аренды {order_id}: {e}", exc_info=True)
+    
+    def _get_processor_by_game_type(self, game_type: GameType):
+        """
+        Вспомогательный метод для получения процессора по game_type.
+        Переопределяется в CommonRentProcessor для доступа к процессорам.
+        """
+        return None
 
     @abstractmethod
     def get_code(self, login: str):

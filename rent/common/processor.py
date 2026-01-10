@@ -12,10 +12,12 @@ logger = get_logger(__name__)
 
 
 class CommonRentProcessor(BaseRentProcessor):
-    def __init__(self, account: Account, profile: UserProfile):
+    def __init__(self, account: Account, profile: UserProfile, processors_dict=None, gt_keys_dict=None):
         super().__init__(account)
         self.game_type = GameType.NONE
         self.profile = profile
+        self._processors_dict = processors_dict  # Ссылка на словарь процессоров из FunPayManager
+        self._gt_keys_dict = gt_keys_dict  # Ссылка на словарь game_type -> ключ процессора
 
     def change_lots_status(self):
         pass
@@ -30,7 +32,21 @@ class CommonRentProcessor(BaseRentProcessor):
         pass
 
     def kick(self, login: str, password: str):
-        pass
+        """
+        CommonRentProcessor не может выкинуть пользователя напрямую,
+        так как не знает тип игры. Метод должен вызываться через правильный процессор.
+        """
+        logger.warning(f"⚠️ kick вызван для CommonRentProcessor (не должен вызываться напрямую для логина {login})")
+    
+    def _get_processor_by_game_type(self, game_type: GameType):
+        """
+        Получает правильный процессор по game_type.
+        """
+        if self._gt_keys_dict and self._processors_dict:
+            processor_key = self._gt_keys_dict.get(game_type)
+            if processor_key:
+                return self._processors_dict.get(processor_key)
+        return None
 
 
     def on_sale(self, order: OrderShortcut):
