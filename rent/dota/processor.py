@@ -217,14 +217,18 @@ class DotaRentProcessor(BaseRentProcessor):
 
     def kick(self, login: str, password: str):
         try:
-            logger.info(f"Начинаю выкидывать из аккаунта: {login}")
-            result = kick_user_from_account(login, password)
-            if not result:
-                logger.error(f"❌ Не удалось выкинуть из аккаунта: {login}")
-            else:
-                logger.info(f"Успешно выкинули с аккаунта {login}")
+            logger.info(f"🚀 Начинаю выкидывать из аккаунта: {login}")
+            try:
+                result = kick_user_from_account(login, password)
+                if not result:
+                    logger.error(f"❌ Не удалось выкинуть из аккаунта: {login}")
+                else:
+                    logger.info(f"✅ Успешно выкинули с аккаунта {login}")
+            except Exception as e:
+                logger.error(f"❌ Исключение в kick_user_from_account для {login}: {e}", exc_info=True)
+                raise
         except Exception as e:
-            logger.error(f"❌ Ошибка при отключении пользователя от аккаунта {login}: {e}", exc_info=True)
+            logger.error(f"❌ Критическая ошибка при отключении пользователя от аккаунта {login}: {e}", exc_info=True)
 
 
 

@@ -323,30 +323,65 @@ class Steam:
         try:
             # Инициализируем драйвер
             logger.info("🚀 Запускаем браузер...")
-            self._init_driver()
-            
-            # Получаем Steam Guard код
-            code = get_steam_guard_code(login=self.login)
-            if not code:
-                logger.error("Не удалось получить Steam Guard код")
+            try:
+                self._init_driver()
+                logger.info("✅ Браузер успешно запущен")
+            except Exception as e:
+                logger.error(f"❌ Ошибка при инициализации браузера: {e}", exc_info=True)
                 return False
             
-            logger.info(f"🔐 Получен Steam Guard код: {code}")
+            # Получаем Steam Guard код
+            logger.info(f"🔐 Получаем Steam Guard код для {self.login}...")
+            try:
+                code = get_steam_guard_code(login=self.login)
+                if not code:
+                    logger.error("❌ Не удалось получить Steam Guard код")
+                    return False
+                logger.info(f"✅ Получен Steam Guard код: {code}")
+            except Exception as e:
+                logger.error(f"❌ Исключение при получении Steam Guard кода: {e}", exc_info=True)
+                return False
             
             # Авторизуемся
-            if not self.authenticate(code):
+            logger.info(f"🔑 Начинаем авторизацию для {self.login}...")
+            try:
+                auth_result = self.authenticate(code)
+                if not auth_result:
+                    logger.error(f"❌ Авторизация не удалась для {self.login}")
+                    return False
+                logger.info(f"✅ Авторизация успешна для {self.login}")
+            except Exception as e:
+                logger.error(f"❌ Исключение при авторизации: {e}", exc_info=True)
                 return False
             
             # Небольшая пауза
+            logger.info("⏳ Пауза перед выходом на всех устройствах...")
             time.sleep(2)
             
             # Выходим на всех устройствах
-            return self.deauthorize_all_devices()
+            logger.info(f"🚪 Начинаем выход на всех устройствах для {self.login}...")
+            try:
+                deauth_result = self.deauthorize_all_devices()
+                if deauth_result:
+                    logger.info(f"✅ Успешно выкинули из аккаунта {self.login}")
+                else:
+                    logger.error(f"❌ Не удалось выкинуть из аккаунта {self.login}")
+                return deauth_result
+            except Exception as e:
+                logger.error(f"❌ Исключение при выходе на всех устройствах: {e}", exc_info=True)
+                return False
             
+        except Exception as e:
+            logger.error(f"❌ Критическая ошибка в kick_all_sessions для {self.login}: {e}", exc_info=True)
+            return False
         finally:
             # Закрываем браузер
-            logger.info("🔚 Закрываем браузер...")
-            self._close_driver()
+            logger.info(f"🔚 Закрываем браузер для {self.login}...")
+            try:
+                self._close_driver()
+                logger.info(f"✅ Браузер закрыт для {self.login}")
+            except Exception as e:
+                logger.error(f"❌ Ошибка при закрытии браузера: {e}", exc_info=True)
 
 
 def kick_user_from_account(login: str, password: str, headless: bool = True) -> bool:
