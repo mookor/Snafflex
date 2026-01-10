@@ -63,6 +63,13 @@ class RentDatabase:
                 # Колонка уже существует, игнорируем ошибку
                 pass
             
+            # Миграция: добавляем колонку chat_id, если её нет (для существующих БД)
+            try:
+                cursor.execute("ALTER TABLE rentals ADD COLUMN chat_id TEXT")
+            except sqlite3.OperationalError:
+                # Колонка уже существует, игнорируем ошибку
+                pass
+            
             # Базовая таблица аккаунтов
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS accounts (
@@ -129,8 +136,8 @@ class RentDatabase:
                 INSERT INTO rentals (
                     order_id, buyer_id, start_rent_time, end_rent_time, 
                     game_type, account_login, income, amount, notifed, 
-                    feedback_bonus_given, in_rent, payed
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    feedback_bonus_given, in_rent, payed, chat_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 rental.order_id,
                 rental.buyer_id,
@@ -143,7 +150,8 @@ class RentDatabase:
                 int(rental.notifed),
                 int(rental.feedback_bonus_given),
                 int(rental.in_rent),
-                rental.payed.value
+                rental.payed.value,
+                str(rental.chat_id) if rental.chat_id is not None else None
             ))
             return cursor.rowcount > 0
     
@@ -501,6 +509,19 @@ class RentDatabase:
     
     def _row_to_rental(self, row: sqlite3.Row) -> RentalInfo:
         """Преобразовать строку БД в объект RentalInfo."""
+        # Получаем chat_id с обработкой отсутствия колонки (для обратной совместимости)
+        chat_id = None
+        if 'chat_id' in row.keys() and row['chat_id'] is not None:
+            chat_id_value = row['chat_id']
+            # Пытаемся преобразовать в int, если это число, иначе оставляем строкой
+            try:
+                if isinstance(chat_id_value, str) and chat_id_value.isdigit():
+                    chat_id = int(chat_id_value)
+                elif isinstance(chat_id_value, (int, str)):
+                    chat_id = chat_id_value
+            except (ValueError, TypeError):
+                chat_id = chat_id_value
+        
         return RentalInfo(
             buyer_id=row['buyer_id'],
             start_rent_time=row['start_rent_time'],
@@ -513,6 +534,7 @@ class RentDatabase:
             notifed=bool(row['notifed']),
             feedback_bonus_given=bool(row['feedback_bonus_given']),
             in_rent=bool(row['in_rent']),
-            payed=PayedStatus(row['payed'])
+            payed=PayedStatus(row['payed']),
+            chat_id=chat_id
         )
 

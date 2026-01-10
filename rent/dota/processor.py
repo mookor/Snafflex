@@ -341,6 +341,7 @@ class DotaRentProcessor(BaseRentProcessor):
                     account_login=login,
                     income=order.price,
                     amount=order.amount,
+                    chat_id=order.chat_id,
                 )
                 self.db.add_rental(rental)
                 self.db.update_account_rented_by(login, order.buyer_id)

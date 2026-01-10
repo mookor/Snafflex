@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from rent.game_type import GameType
-from typing import Optional
+from typing import Optional, Union
 from enum import Enum
 
 class PayedStatus(Enum):
@@ -22,6 +22,7 @@ class RentalInfo:
     feedback_bonus_given: bool = False
     in_rent: bool = True
     payed: PayedStatus = PayedStatus.BUYED
+    chat_id: Optional[Union[str, int]] = None
     
     
 

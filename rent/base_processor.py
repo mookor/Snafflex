@@ -87,7 +87,8 @@ class BaseRentProcessor(ABC):
                 return
 
             if chat_id is None:
-                chat_id = self.get_chat_id(rent.buyer_id)
+                # Используем chat_id из аренды, если он есть, иначе вычисляем
+                chat_id = rent.chat_id if rent.chat_id is not None else self.get_chat_id(rent.buyer_id)
 
             if not rent.in_rent:  # если уже кончилось игровое время
                 try:
@@ -136,7 +137,8 @@ class BaseRentProcessor(ABC):
 
         try:
             if chat_id is None:
-                chat_id = self.get_chat_id(buyer_id)
+                # Используем chat_id из аренды, если он есть, иначе вычисляем
+                chat_id = rent.chat_id if rent.chat_id is not None else self.get_chat_id(buyer_id)
             
             try:
                 self.db.set_in_rent_false(order_id)
@@ -234,7 +236,8 @@ class BaseRentProcessor(ABC):
         try:
             rent = self.db.get_rental_by_order_id(order_id)
             if chat_id is None:
-                chat_id = self.get_chat_id(buyer_id)
+                # Используем chat_id из аренды, если он есть, иначе вычисляем
+                chat_id = rent.chat_id if rent and rent.chat_id is not None else self.get_chat_id(buyer_id)
 
             if not rent:
                 try:
@@ -334,7 +337,8 @@ class BaseRentProcessor(ABC):
         try:
             rent = self.db.get_rental_by_order_id(order_id)
             if chat_id is None:
-                chat_id = self.get_chat_id(buyer_id)
+                # Используем chat_id из аренды, если он есть, иначе вычисляем
+                chat_id = rent.chat_id if rent and rent.chat_id is not None else self.get_chat_id(buyer_id)
             if not rent:
                 try:
                     self.account.send_message(chat_id, f"❌ Заказ #{order_id} не найден.")
@@ -482,7 +486,8 @@ class BaseRentProcessor(ABC):
         try:
             buyer_id = rent.buyer_id
             order_id = rent.order_id
-            chat_id = self.get_chat_id(buyer_id)
+            # Используем chat_id из аренды, если он есть, иначе вычисляем
+            chat_id = rent.chat_id if rent.chat_id is not None else self.get_chat_id(buyer_id)
             current_time = time.time()
             remaining_time = rent.end_rent_time - current_time
             hours = int(remaining_time // 3600)
