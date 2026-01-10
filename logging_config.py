@@ -25,14 +25,16 @@ def setup_logging(level: int = logging.INFO):
     
     # Получаем корневой логгер
     root_logger = logging.getLogger()
-    root_logger.setLevel(level)
+    # Устанавливаем минимальный уровень на DEBUG, чтобы пропускать все логи
+    # Затем фильтруем на уровне обработчиков
+    root_logger.setLevel(logging.DEBUG)
     
     # Очищаем существующие обработчики
     root_logger.handlers.clear()
     
-    # Обработчик для консоли
+    # Обработчик для консоли - устанавливаем уровень явно
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(level)
+    console_handler.setLevel(level)  # INFO будет показывать INFO, WARNING, ERROR, CRITICAL
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
     
@@ -43,7 +45,7 @@ def setup_logging(level: int = logging.INFO):
         backupCount=5,
         encoding="utf-8"
     )
-    file_handler.setLevel(level)
+    file_handler.setLevel(level)  # INFO будет показывать INFO, WARNING, ERROR, CRITICAL
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
     
@@ -53,7 +55,21 @@ def setup_logging(level: int = logging.INFO):
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     
-    logging.info(f"📝 Логирование настроено. Файл: {LOG_FILE}")
+    # Явно устанавливаем уровень для наших модулей, чтобы гарантировать логирование
+    # Это гарантирует, что даже если логгер создан до setup_logging, он будет работать
+    logging.getLogger("auth.steam.steam_client").setLevel(logging.INFO)
+    logging.getLogger("rent").setLevel(logging.INFO)
+    logging.getLogger("rent.base_processor").setLevel(logging.INFO)
+    logging.getLogger("rent.dota.processor").setLevel(logging.INFO)
+    logging.getLogger("FunPayManager").setLevel(logging.INFO)
+    
+    # Убеждаемся, что propagation включен (по умолчанию True, но на всякий случай)
+    for logger_name in ["auth.steam.steam_client", "rent", "rent.base_processor", 
+                        "rent.dota.processor", "FunPayManager"]:
+        logger = logging.getLogger(logger_name)
+        logger.propagate = True
+    
+    logging.info(f"📝 Логирование настроено. Файл: {LOG_FILE}, Уровень: {logging.getLevelName(level)}")
 
 
 def get_logger(name: str) -> logging.Logger:
