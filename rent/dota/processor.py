@@ -406,40 +406,46 @@ class DotaRentProcessor(BaseRentProcessor):
                     pass
                 return
 
+            # Ищем и удаляем лот продления по original_order_id
             try:
-                lot = LotsManager.find_lot_by_login(self.account, self.game_type, rent.account_login)
-                if lot:
+                extend_lot = LotsManager.find_extend_lot(self.account, original_order_id, rent.game_type)
+                if extend_lot:
                     try:
-                        self.account.delete_lot(lot.id)
+                        self.account.delete_lot(extend_lot.id)
+                        logger.info(f"✅ Удален лот продления {extend_lot.id} для заказа {original_order_id}")
                     except RequestFailedError as e:
                         if hasattr(e, 'status_code') and e.status_code == 429:
-                            logger.warning(f"⚠️ 429 Too Many Requests при удалении лота продления {lot.id}. Ожидание 30 секунд...")
+                            logger.warning(f"⚠️ 429 Too Many Requests при удалении лота продления {extend_lot.id}. Ожидание 30 секунд...")
                             time.sleep(30)
                             try:
-                                self.account.delete_lot(lot.id)
+                                self.account.delete_lot(extend_lot.id)
+                                logger.info(f"✅ Удален лот продления {extend_lot.id} для заказа {original_order_id} (повторная попытка)")
                             except Exception as e2:
-                                logger.error(f"❌ Ошибка при повторном удалении лота продления {lot.id}: {e2}", exc_info=True)
+                                logger.error(f"❌ Ошибка при повторном удалении лота продления {extend_lot.id}: {e2}", exc_info=True)
                         else:
-                            logger.error(f"❌ Ошибка при удалении лота продления {lot.id}: {e}", exc_info=True)
+                            logger.error(f"❌ Ошибка при удалении лота продления {extend_lot.id}: {e}", exc_info=True)
                     except Exception as e:
-                        logger.error(f"❌ Ошибка при удалении лота продления {lot.id}: {e}", exc_info=True)
+                        logger.error(f"❌ Ошибка при удалении лота продления {extend_lot.id}: {e}", exc_info=True)
+                else:
+                    logger.warning(f"⚠️ Лот продления для заказа {original_order_id} не найден (возможно, уже удален)")
             except RequestFailedError as e:
                 if hasattr(e, 'status_code') and e.status_code == 429:
-                    logger.warning(f"⚠️ 429 Too Many Requests при поиске лота продления для {rent.account_login}. Ожидание 30 секунд...")
+                    logger.warning(f"⚠️ 429 Too Many Requests при поиске лота продления для заказа {original_order_id}. Ожидание 30 секунд...")
                     time.sleep(30)
                     try:
-                        lot = LotsManager.find_lot_by_login(self.account, self.game_type, rent.account_login)
-                        if lot:
+                        extend_lot = LotsManager.find_extend_lot(self.account, original_order_id, rent.game_type)
+                        if extend_lot:
                             try:
-                                self.account.delete_lot(lot.id)
+                                self.account.delete_lot(extend_lot.id)
+                                logger.info(f"✅ Удален лот продления {extend_lot.id} для заказа {original_order_id} (после повторного поиска)")
                             except Exception as e2:
-                                logger.error(f"❌ Ошибка при удалении лота продления {lot.id}: {e2}", exc_info=True)
+                                logger.error(f"❌ Ошибка при удалении лота продления {extend_lot.id}: {e2}", exc_info=True)
                     except Exception as e2:
-                        logger.error(f"❌ Ошибка при повторном поиске лота продления для {rent.account_login}: {e2}", exc_info=True)
+                        logger.error(f"❌ Ошибка при повторном поиске лота продления для заказа {original_order_id}: {e2}", exc_info=True)
                 else:
-                    logger.error(f"❌ Ошибка при поиске лота продления для {rent.account_login}: {e}", exc_info=True)
+                    logger.error(f"❌ Ошибка при поиске лота продления для заказа {original_order_id}: {e}", exc_info=True)
             except Exception as e:
-                logger.error(f"❌ Ошибка при поиске лота продления для {rent.account_login}: {e}", exc_info=True)
+                logger.error(f"❌ Ошибка при поиске лота продления для заказа {original_order_id}: {e}", exc_info=True)
 
             try:
                 self.account.send_message(chat_id, f"Аренда успешно продлена на {order.amount}ч.")
