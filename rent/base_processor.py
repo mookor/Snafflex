@@ -149,6 +149,9 @@ class BaseRentProcessor(ABC):
                 account = self.db.get_account_by_login(rent.account_login)
                 if account:
                     self.kick(login=account.login, password=account.password)
+                else:
+                    logger.error(f"❌ Ошибка при отключении пользователя от аккаунта {rent.account_login}")
+                    
             except Exception as e:
                 logger.error(f"❌ Ошибка при отключении пользователя от аккаунта {rent.account_login}: {e}", exc_info=True)
 
