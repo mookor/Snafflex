@@ -2,6 +2,7 @@ from typing import Optional
 from rent.base_processor import BaseRentProcessor
 from FunPayAPI.types import OrderShortcut
 from FunPayAPI.account import Account
+from FunPayAPI.common.exceptions import RequestFailedError
 from db.database import RentDatabase
 from rent.game_type import GameType
 from db.rent_tables import RentalInfo
@@ -34,9 +35,26 @@ class DotaRentProcessor(BaseRentProcessor):
         self.game_type = GameType.DOTA
 
     def change_lots_status(self):
+        last_429_time = 0
+        consecutive_429_count = 0
+        
         while True:
             try:
                 all_lots = LotsManager.find_all_game_lots(self.account, self.game_type)
+                # Сбрасываем счетчик при успешном получении списка
+                consecutive_429_count = 0
+            except RequestFailedError as e:
+                if hasattr(e, 'status_code') and e.status_code == 429:
+                    consecutive_429_count += 1
+                    wait_time = min(60 * consecutive_429_count, 300)  # Максимум 5 минут
+                    logger.warning(f"⚠️ 429 Too Many Requests при получении лотов. Ожидание {wait_time} секунд...")
+                    time.sleep(wait_time)
+                    last_429_time = time.time()
+                    continue
+                else:
+                    logger.error(f"❌ Ошибка при получении списка лотов: {e}", exc_info=True)
+                    time.sleep(10)
+                    continue
             except Exception as e:
                 logger.error(f"❌ Ошибка при получении списка лотов: {e}", exc_info=True)
                 time.sleep(10)
@@ -44,6 +62,13 @@ class DotaRentProcessor(BaseRentProcessor):
 
             for lot in all_lots:
                 try:
+                    # Проверяем, не было ли недавно ошибки 429
+                    if last_429_time > 0 and (time.time() - last_429_time) < 60:
+                        # Увеличиваем задержку после 429
+                        time.sleep(3)
+                    else:
+                        time.sleep(2)  # Обычная задержка между запросами
+                    
                     login = lot.description.split("|")[-1].split(",")[0].strip().lower()
                     acc = self.db.get_account_by_login(login)
                     
@@ -54,41 +79,126 @@ class DotaRentProcessor(BaseRentProcessor):
                     status = not (acc.is_banned or acc.is_busy)
                     if lot.active == status:
                         continue
-                    try:
-                        if not status:
-                            LotsManager.disable_lot(self.account, lot)
-                        else:
-                            LotsManager.enable_lot(self.account, lot)
-                        logger.info(f"{'✅' if status else '❌'} Лот {acc.login}: {'вкл' if status else 'выкл'}")
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка при изменении статуса лота {lot.id} ({lot.description}): {e}", exc_info=True)
+                    
+                    # Пытаемся изменить статус лота с обработкой 429
+                    retries = 3
+                    success = False
+                    for attempt in range(retries):
+                        try:
+                            if not status:
+                                LotsManager.disable_lot(self.account, lot)
+                            else:
+                                LotsManager.enable_lot(self.account, lot)
+                            logger.info(f"{'✅' if status else '❌'} Лот {acc.login}: {'вкл' if status else 'выкл'}")
+                            success = True
+                            consecutive_429_count = 0  # Сбрасываем счетчик при успехе
+                            break
+                        except RequestFailedError as e:
+                            if hasattr(e, 'status_code') and e.status_code == 429:
+                                consecutive_429_count += 1
+                                wait_time = min(30 * consecutive_429_count, 180)  # Максимум 3 минуты
+                                logger.warning(
+                                    f"⚠️ 429 Too Many Requests при изменении статуса лота {lot.id} "
+                                    f"(попытка {attempt + 1}/{retries}). Ожидание {wait_time} секунд..."
+                                )
+                                last_429_time = time.time()
+                                time.sleep(wait_time)
+                                if attempt < retries - 1:
+                                    continue
+                                else:
+                                    logger.error(f"❌ Не удалось изменить статус лота {lot.id} после {retries} попыток")
+                            else:
+                                logger.error(f"❌ Ошибка при изменении статуса лота {lot.id} ({lot.description}): {e}", exc_info=True)
+                                break
+                        except Exception as e:
+                            logger.error(f"❌ Ошибка при изменении статуса лота {lot.id} ({lot.description}): {e}", exc_info=True)
+                            break
+                    
+                    if not success:
+                        # Если не удалось изменить статус после всех попыток, пропускаем этот лот
+                        continue
+                        
                 except Exception as e:
                     logger.error(f"❌ Ошибка при обработке лота {lot.id if lot else 'unknown'}: {e}", exc_info=True)
-                
-                time.sleep(1)
-            time.sleep(60)
+                    time.sleep(1)
+            
+            # Увеличиваем интервал между циклами, если были ошибки 429
+            if last_429_time > 0 and (time.time() - last_429_time) < 300:
+                sleep_time = 120  # 2 минуты после ошибки 429
+            else:
+                sleep_time = 60  # Обычный интервал
+            time.sleep(sleep_time)
 
     def auto_reply(self, message):
         pass
 
     def create_missing_lots(self):
+        last_429_time = 0
+        consecutive_429_count = 0
+        
         while True:
             try:
                 all_accounts = self.db.get_accounts_by_game(self.game_type)
+                consecutive_429_count = 0  # Сбрасываем счетчик при успешном получении аккаунтов
+                
                 for acc in all_accounts:
                     try:
+                        # Проверяем, не было ли недавно ошибки 429
+                        if last_429_time > 0 and (time.time() - last_429_time) < 60:
+                            time.sleep(3)  # Увеличиваем задержку после 429
+                        else:
+                            time.sleep(2)  # Обычная задержка
+                        
                         lot = LotsManager.find_lot_by_login(self.account, self.game_type, acc.login)
                         if not lot:
-                            try:
-                                LotsManager.create_dota_rent(self.account, acc.mmr, acc.login, not (acc.is_busy or acc.is_banned), acc.behavior_score)
-                                logger.info(f"✅ Создан лот: {acc.login}")
-                            except Exception as e:
-                                logger.error(f"❌ Ошибка при создании лота для {acc.login}: {e}", exc_info=True)
+                            retries = 3
+                            success = False
+                            for attempt in range(retries):
+                                try:
+                                    LotsManager.create_dota_rent(self.account, acc.mmr, acc.login, not (acc.is_busy or acc.is_banned), acc.behavior_score)
+                                    logger.info(f"✅ Создан лот: {acc.login}")
+                                    success = True
+                                    consecutive_429_count = 0
+                                    break
+                                except RequestFailedError as e:
+                                    if hasattr(e, 'status_code') and e.status_code == 429:
+                                        consecutive_429_count += 1
+                                        wait_time = min(30 * consecutive_429_count, 180)
+                                        logger.warning(
+                                            f"⚠️ 429 Too Many Requests при создании лота для {acc.login} "
+                                            f"(попытка {attempt + 1}/{retries}). Ожидание {wait_time} секунд..."
+                                        )
+                                        last_429_time = time.time()
+                                        time.sleep(wait_time)
+                                        if attempt < retries - 1:
+                                            continue
+                                    else:
+                                        logger.error(f"❌ Ошибка при создании лота для {acc.login}: {e}", exc_info=True)
+                                        break
+                                except Exception as e:
+                                    logger.error(f"❌ Ошибка при создании лота для {acc.login}: {e}", exc_info=True)
+                                    break
+                            
+                            if not success:
+                                logger.warning(f"⚠️ Не удалось создать лот для {acc.login} после {retries} попыток")
+                    except RequestFailedError as e:
+                        if hasattr(e, 'status_code') and e.status_code == 429:
+                            consecutive_429_count += 1
+                            wait_time = min(30 * consecutive_429_count, 180)
+                            logger.warning(f"⚠️ 429 Too Many Requests при проверке лота для {acc.login}. Ожидание {wait_time} секунд...")
+                            last_429_time = time.time()
+                            time.sleep(wait_time)
+                        else:
+                            logger.error(f"❌ Ошибка при проверке/создании лота для аккаунта {acc.login if acc else 'unknown'}: {e}", exc_info=True)
                     except Exception as e:
                         logger.error(f"❌ Ошибка при проверке/создании лота для аккаунта {acc.login if acc else 'unknown'}: {e}", exc_info=True)
 
-                    time.sleep(1)
-                time.sleep(60)
+                # Увеличиваем интервал между циклами, если были ошибки 429
+                if last_429_time > 0 and (time.time() - last_429_time) < 300:
+                    sleep_time = 120
+                else:
+                    sleep_time = 60
+                time.sleep(sleep_time)
             except KeyboardInterrupt:
                 raise
             except Exception as e:
@@ -125,6 +235,29 @@ class DotaRentProcessor(BaseRentProcessor):
 
             try:
                 lot = LotsManager.find_lot_by_login(self.account, self.game_type, login)
+            except RequestFailedError as e:
+                if hasattr(e, 'status_code') and e.status_code == 429:
+                    logger.warning(f"⚠️ 429 Too Many Requests при поиске лота для {login}. Ожидание 30 секунд...")
+                    time.sleep(30)
+                    # Повторная попытка
+                    try:
+                        lot = LotsManager.find_lot_by_login(self.account, self.game_type, login)
+                    except Exception as e2:
+                        logger.error(f"❌ Ошибка при повторном поиске лота для {login}: {e2}", exc_info=True)
+                        self.on_return(
+                            order.id, order.buyer_id,
+                            message="Извините, произошла ошибка\nДеньги возвращены на ваш счет",
+                            chat_id=order.chat_id,
+                        )
+                        return
+                else:
+                    logger.error(f"❌ Ошибка при поиске лота для {login}: {e}", exc_info=True)
+                    self.on_return(
+                        order.id, order.buyer_id,
+                        message="Извините, произошла ошибка\nДеньги возвращены на ваш счет",
+                        chat_id=order.chat_id,
+                    )
+                    return
             except Exception as e:
                 logger.error(f"❌ Ошибка при поиске лота для {login}: {e}", exc_info=True)
                 self.on_return(
@@ -177,6 +310,18 @@ class DotaRentProcessor(BaseRentProcessor):
 
             try:
                 LotsManager.disable_lot(self.account, lot)
+            except RequestFailedError as e:
+                if hasattr(e, 'status_code') and e.status_code == 429:
+                    logger.warning(f"⚠️ 429 Too Many Requests при отключении лота {lot.id}. Ожидание 30 секунд...")
+                    time.sleep(30)
+                    try:
+                        LotsManager.disable_lot(self.account, lot)
+                    except Exception as e2:
+                        logger.error(f"❌ Ошибка при повторном отключении лота {lot.id}: {e2}", exc_info=True)
+                        # Продолжаем, даже если не удалось отключить лот
+                else:
+                    logger.error(f"❌ Ошибка при отключении лота {lot.id}: {e}", exc_info=True)
+                    # Продолжаем, даже если не удалось отключить лот
             except Exception as e:
                 logger.error(f"❌ Ошибка при отключении лота {lot.id}: {e}", exc_info=True)
                 # Продолжаем, даже если не удалось отключить лот
@@ -266,8 +411,33 @@ class DotaRentProcessor(BaseRentProcessor):
                 if lot:
                     try:
                         self.account.delete_lot(lot.id)
+                    except RequestFailedError as e:
+                        if hasattr(e, 'status_code') and e.status_code == 429:
+                            logger.warning(f"⚠️ 429 Too Many Requests при удалении лота продления {lot.id}. Ожидание 30 секунд...")
+                            time.sleep(30)
+                            try:
+                                self.account.delete_lot(lot.id)
+                            except Exception as e2:
+                                logger.error(f"❌ Ошибка при повторном удалении лота продления {lot.id}: {e2}", exc_info=True)
+                        else:
+                            logger.error(f"❌ Ошибка при удалении лота продления {lot.id}: {e}", exc_info=True)
                     except Exception as e:
                         logger.error(f"❌ Ошибка при удалении лота продления {lot.id}: {e}", exc_info=True)
+            except RequestFailedError as e:
+                if hasattr(e, 'status_code') and e.status_code == 429:
+                    logger.warning(f"⚠️ 429 Too Many Requests при поиске лота продления для {rent.account_login}. Ожидание 30 секунд...")
+                    time.sleep(30)
+                    try:
+                        lot = LotsManager.find_lot_by_login(self.account, self.game_type, rent.account_login)
+                        if lot:
+                            try:
+                                self.account.delete_lot(lot.id)
+                            except Exception as e2:
+                                logger.error(f"❌ Ошибка при удалении лота продления {lot.id}: {e2}", exc_info=True)
+                    except Exception as e2:
+                        logger.error(f"❌ Ошибка при повторном поиске лота продления для {rent.account_login}: {e2}", exc_info=True)
+                else:
+                    logger.error(f"❌ Ошибка при поиске лота продления для {rent.account_login}: {e}", exc_info=True)
             except Exception as e:
                 logger.error(f"❌ Ошибка при поиске лота продления для {rent.account_login}: {e}", exc_info=True)
 
@@ -280,24 +450,80 @@ class DotaRentProcessor(BaseRentProcessor):
             logger.error(f"❌ Критическая ошибка при обработке продления {original_order_id}: {e}", exc_info=True)
 
     def update_mmr(self):
+        last_429_time = 0
+        consecutive_429_count = 0
+        
         while True:
             try:
                 all_accounts = self.db.get_accounts_by_game(self.game_type)
+                consecutive_429_count = 0  # Сбрасываем счетчик при успешном получении аккаунтов
+                
                 for acc in all_accounts:
                     try:
+                        # Проверяем, не было ли недавно ошибки 429
+                        if last_429_time > 0 and (time.time() - last_429_time) < 60:
+                            time.sleep(3)
+                        else:
+                            time.sleep(2)
+                        
                         new_mmr = get_rank(acc.dota_id)
                         if new_mmr != acc.mmr:
                             logger.info(f"📈 MMR {acc.login}: {acc.mmr} → {new_mmr}")
                             self.db.update_dota_account(acc.login, mmr=new_mmr)
-                            lot = LotsManager.find_lot_by_login(self.account, self.game_type, acc.login)
-                            if lot:
-                                LotsManager.update_mmr(self.account, lot, new_mmr, acc.login)
+                            
+                            retries = 3
+                            success = False
+                            for attempt in range(retries):
+                                try:
+                                    lot = LotsManager.find_lot_by_login(self.account, self.game_type, acc.login)
+                                    if lot:
+                                        LotsManager.update_mmr(self.account, lot, new_mmr, acc.login)
+                                    success = True
+                                    consecutive_429_count = 0
+                                    break
+                                except RequestFailedError as e:
+                                    if hasattr(e, 'status_code') and e.status_code == 429:
+                                        consecutive_429_count += 1
+                                        wait_time = min(30 * consecutive_429_count, 180)
+                                        logger.warning(
+                                            f"⚠️ 429 Too Many Requests при обновлении MMR лота для {acc.login} "
+                                            f"(попытка {attempt + 1}/{retries}). Ожидание {wait_time} секунд..."
+                                        )
+                                        last_429_time = time.time()
+                                        time.sleep(wait_time)
+                                        if attempt < retries - 1:
+                                            continue
+                                    else:
+                                        logger.error(f"❌ Ошибка при обновлении MMR лота для {acc.login}: {e}", exc_info=True)
+                                        break
+                                except Exception as e:
+                                    logger.error(f"❌ Ошибка при обновлении MMR лота для {acc.login}: {e}", exc_info=True)
+                                    break
+                            
+                            if not success:
+                                logger.warning(f"⚠️ Не удалось обновить MMR лота для {acc.login} после {retries} попыток")
+                    except RequestFailedError as e:
+                        if hasattr(e, 'status_code') and e.status_code == 429:
+                            consecutive_429_count += 1
+                            wait_time = min(30 * consecutive_429_count, 180)
+                            logger.warning(f"⚠️ 429 Too Many Requests при получении MMR для {acc.login}. Ожидание {wait_time} секунд...")
+                            last_429_time = time.time()
+                            time.sleep(wait_time)
+                        else:
+                            logger.error(f"❌ MMR ошибка {acc.login}: {e}", exc_info=True)
                     except Exception as e:
-                        logger.error(f"❌ MMR ошибка {acc.login}: {e}")
-                    time.sleep(1)
-                time.sleep(DotaConfig.MMR_UPDATE_INTERVAL)
+                        logger.error(f"❌ MMR ошибка {acc.login}: {e}", exc_info=True)
+                
+                # Увеличиваем интервал, если были ошибки 429
+                if last_429_time > 0 and (time.time() - last_429_time) < 300:
+                    sleep_time = DotaConfig.MMR_UPDATE_INTERVAL * 2
+                else:
+                    sleep_time = DotaConfig.MMR_UPDATE_INTERVAL
+                time.sleep(sleep_time)
+            except KeyboardInterrupt:
+                raise
             except Exception as e:
-                logger.error(f"❌ Критическая ошибка MMR: {e}")
+                logger.error(f"❌ Критическая ошибка MMR: {e}", exc_info=True)
                 time.sleep(DotaConfig.MMR_UPDATE_INTERVAL)
     
     def run_tasks(self):

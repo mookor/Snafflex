@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from FunPayAPI.types import OrderShortcut
 from FunPayAPI.account import Account
+from FunPayAPI.common.exceptions import RequestFailedError
 from threading import Thread
 from rent.game_type import GameType
 import time
@@ -324,8 +325,37 @@ class BaseRentProcessor(ABC):
                 return
 
             try:
-                LotsManager.create_extend_lot(self.account, order_id, mean_price)
-                extend_lot = LotsManager.find_extend_lot(self.account, order_id, rent.game_type)
+                # Пытаемся создать лот продления с обработкой 429
+                retries = 3
+                extend_lot = None
+                for attempt in range(retries):
+                    try:
+                        LotsManager.create_extend_lot(self.account, order_id, mean_price)
+                        extend_lot = LotsManager.find_extend_lot(self.account, order_id, rent.game_type)
+                        if extend_lot:
+                            break
+                    except RequestFailedError as e:
+                        if hasattr(e, 'status_code') and e.status_code == 429:
+                            wait_time = 30 * (attempt + 1)
+                            logger.warning(
+                                f"⚠️ 429 Too Many Requests при создании лота продления {order_id} "
+                                f"(попытка {attempt + 1}/{retries}). Ожидание {wait_time} секунд..."
+                            )
+                            time.sleep(wait_time)
+                            if attempt < retries - 1:
+                                continue
+                            else:
+                                logger.error(f"❌ Не удалось создать лот продления {order_id} после {retries} попыток из-за 429")
+                                try:
+                                    self.account.send_message(
+                                        chat_id,
+                                        "❌ Слишком много запросов к серверу. Попробуйте через несколько минут.",
+                                    )
+                                except:
+                                    pass
+                                return
+                        else:
+                            raise
 
                 if not extend_lot:
                     logger.error(f"❌ Не удалось создать лот продления: {order_id}")
@@ -347,6 +377,19 @@ class BaseRentProcessor(ABC):
                     logger.info(f"📌 Создан лот продления: {order_id}")
                 except Exception as e:
                     logger.error(f"❌ Ошибка отправки сообщения о создании лота продления: {e}")
+            except RequestFailedError as e:
+                if hasattr(e, 'status_code') and e.status_code == 429:
+                    logger.warning(f"⚠️ 429 Too Many Requests при создании лота продления {order_id}")
+                    try:
+                        self.account.send_message(chat_id, "❌ Слишком много запросов к серверу. Попробуйте через несколько минут.")
+                    except:
+                        pass
+                else:
+                    logger.error(f"❌ Ошибка при создании лота продления {order_id}: {e}", exc_info=True)
+                    try:
+                        self.account.send_message(chat_id, "❌ Произошла ошибка при создании лота продления. Попробуйте позже.")
+                    except:
+                        pass
             except Exception as e:
                 logger.error(f"❌ Ошибка при создании лота продления {order_id}: {e}", exc_info=True)
                 try:
